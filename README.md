@@ -1,0 +1,125 @@
+# Telegram Online Status Tracker
+
+This script tracks the online status of Telegram users and stores the data in a SQLite database. It uses the Telethon library to interact with the Telegram API.
+
+## Features
+
+- Track online status of multiple Telegram users
+- Store user data and status history in SQLite database
+- Configurable via JSON configuration file
+- Detailed logging with console and optional file output
+- Rate limiting to avoid hitting Telegram API limits
+- Robust error handling to prevent crashes
+
+## Requirements
+
+- Python 3.6+
+- Telethon library
+- SQLite3 (included in Python standard library)
+
+## Installation
+
+1. Clone this repository
+2. Install the required dependencies:
+
+```bash
+pip install telethon
+```
+
+## Configuration
+
+The script uses a JSON configuration file (`config.json` by default). If the file doesn't exist, a default configuration will be created on first run.
+
+Example configuration:
+
+```json
+{
+    "telegram": {
+        "api_id": "YOUR_API_ID",
+        "api_hash": "YOUR_API_HASH",
+        "phone": "YOUR_PHONE_NUMBER"
+    },
+    "tracking": {
+        "user_ids": [12345, 67890],
+        "check_interval": 60
+    },
+    "database": {
+        "path": "tracker.db"
+    },
+    "logging": {
+        "level": "INFO",
+        "file": "tracker.log",
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    },
+    "rate_limiting": {
+        "max_requests_per_second": 25
+    }
+}
+```
+
+### Configuration Options
+
+- **telegram**
+  - `api_id`: Your Telegram API ID (get from https://my.telegram.org)
+  - `api_hash`: Your Telegram API hash
+  - `phone`: Your phone number in international format
+
+- **tracking**
+  - `user_ids`: Array of Telegram user IDs to track
+  - `check_interval`: Time in seconds between status checks
+
+- **database**
+  - `path`: Path to the SQLite database file
+
+- **logging**
+  - `level`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  - `file`: Path to log file (set to empty string to disable file logging)
+  - `format`: Log message format
+
+- **rate_limiting**
+  - `max_requests_per_second`: Maximum API requests per second (stay below Telegram's limit of 30)
+
+## Usage
+
+Run the script with:
+
+```bash
+python telegram_tracker.py
+```
+
+You can specify a custom configuration file path:
+
+```bash
+python telegram_tracker.py /path/to/custom_config.json
+```
+
+## Database Schema
+
+The script creates two tables in the SQLite database:
+
+1. **users** - Stores user information
+   - id: Telegram user ID (primary key)
+   - username: Telegram username
+   - first_name: User's first name
+   - last_name: User's last name
+   - phone: User's phone number (if available)
+   - updated_at: Timestamp of last update
+
+2. **status** - Stores status history
+   - id: Auto-incrementing primary key
+   - user_id: Telegram user ID (foreign key to users table)
+   - status: Status string ('online', 'offline', 'recently', etc.)
+   - was_online: Timestamp when user was last seen online (for offline status)
+   - recorded_at: Timestamp when status was recorded
+
+## Error Handling
+
+The script includes comprehensive error handling to prevent crashes:
+- Telegram API rate limiting
+- Network errors
+- Database errors
+- Configuration errors
+
+## License
+
+MIT
