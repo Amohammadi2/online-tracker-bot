@@ -340,7 +340,7 @@ class TelegramTracker:
             
             # Connect to Telegram
             self.logger.info("Connecting to Telegram")
-            await self.client.start(phone=self.phone, password="ashkan@31")
+            await self._connect()
             self.logger.info("Connected to Telegram successfully")
             
             self.is_running = True
@@ -363,12 +363,31 @@ class TelegramTracker:
         self.db_manager.close()
         self.logger.info("Telegram Tracker stopped")
     
+    async def _connect(self):
+        return await self.client.start(phone=self.phone, password="ashkan@31")
+
+    async def _reconnect_if_needed(self):
+        while True:
+            if not self.client.is_connected():
+                self.logger.warning("Client disconnected. Reconnecting...")
+                self.client.disconnect() # clean up any old connections
+                try:
+                    await self._connect()
+                    self.logger.info("Successfully reconnected to Telegram APIs")
+                except Exception as e:
+                    self.logger.info(f'Error reconnecting (next retry within 10 seconds): {e}')
+                    await asyncio.sleep(10)
+            else:
+                break
+
+
     async def _tracking_loop(self) -> None:
         """Main tracking loop that periodically checks users' status."""
         self.logger.info(f"Starting tracking loop for {len(self.user_ids)} users")
         self.logger.info(f"Check interval: {self.check_interval} seconds")
         
         while self.is_running:
+            self._reconnect_if_needed()
             try:
                 await self._check_all_users()
                 self.logger.info(f"Sleeping for {self.check_interval} seconds")
