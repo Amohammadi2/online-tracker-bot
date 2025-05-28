@@ -367,6 +367,7 @@ class TelegramTracker:
         return await self.client.start(phone=self.phone, password="ashkan@31")
 
     async def _reconnect_if_needed(self):
+        """Reconnects to the telegram server in case connection is lost"""
         while True:
             if not self.client.is_connected():
                 self.logger.warning("Client disconnected. Reconnecting...")

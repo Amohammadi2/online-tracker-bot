@@ -1,36 +1,46 @@
 # Telegram Online Status Tracker
 
-This script tracks the online status of Telegram users and stores the data in a SQLite database. It uses the Telethon library to interact with the Telegram API.
+## Overview
+
+Telegram Online Status Tracker is a Python-based tool that monitors and records the online status of Telegram users. The application connects to the Telegram API, periodically checks the status of specified users, and stores this information in a SQLite database for later analysis or reference.
 
 ## Features
 
-- Track online status of multiple Telegram users
-- Store user data and status history in SQLite database
-- Configurable via JSON configuration file
-- Detailed logging with console and optional file output
-- Rate limiting to avoid hitting Telegram API limits
-- Robust error handling to prevent crashes
+- Track online/offline status of multiple Telegram users
+- Record status history with timestamps in a SQLite database
+- Deploy and manage the tracker on remote servers using the admin CLI
+- Automatic service management via systemd on remote servers
+- Rate limiting to prevent hitting Telegram API restrictions
 
-## Requirements
+## Development Setup
 
-- Python 3.6+
-- Telethon library
-- SQLite3 (included in Python standard library)
+### Prerequisites
 
-## Installation
+- Python 3.12 or higher
+- Git (for cloning the repository)
 
-1. Clone this repository
+### Setting Up the Tracker
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/online-tracker-bot.git
+   cd online-tracker-bot
+   ```
+
 2. Install the required dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-```bash
-pip install telethon
-```
+3. Create a configuration file:
+   - The application will create a default `config.json` file on first run
+   - Alternatively, you can create it manually following the template below
 
-## Configuration
+4. Configure your Telegram API credentials:
+   - Obtain your API ID and API Hash from [my.telegram.org](https://my.telegram.org)
+   - Update the `config.json` file with your credentials
 
-The script uses a JSON configuration file (`config.json` by default). If the file doesn't exist, a default configuration will be created on first run.
-
-Example configuration:
+### Configuration Template
 
 ```json
 {
@@ -40,7 +50,7 @@ Example configuration:
         "phone": "YOUR_PHONE_NUMBER"
     },
     "tracking": {
-        "user_ids": [12345, 67890],
+        "user_ids": [1234567890, "@another_user"],
         "check_interval": 60
     },
     "database": {
@@ -57,31 +67,9 @@ Example configuration:
 }
 ```
 
-### Configuration Options
+### Running the Tracker Locally
 
-- **telegram**
-  - `api_id`: Your Telegram API ID (get from https://my.telegram.org)
-  - `api_hash`: Your Telegram API hash
-  - `phone`: Your phone number in international format
-
-- **tracking**
-  - `user_ids`: Array of Telegram user IDs to track
-  - `check_interval`: Time in seconds between status checks
-
-- **database**
-  - `path`: Path to the SQLite database file
-
-- **logging**
-  - `level`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-  - `file`: Path to log file (set to empty string to disable file logging)
-  - `format`: Log message format
-
-- **rate_limiting**
-  - `max_requests_per_second`: Maximum API requests per second (stay below Telegram's limit of 30)
-
-## Usage
-
-Run the script with:
+Start the tracker with:
 
 ```bash
 python telegram_tracker.py
@@ -93,118 +81,104 @@ You can specify a custom configuration file path:
 python telegram_tracker.py /path/to/custom_config.json
 ```
 
-## Database Schema
+## Admin CLI Setup and Usage
 
-The script creates two tables in the SQLite database:
+The Admin CLI tool allows you to deploy and manage the tracker on remote servers without manual setup.
 
-1. **users** - Stores user information
-   - id: Telegram user ID (primary key)
-   - username: Telegram username
-   - first_name: User's first name
-   - last_name: User's last name
-   - phone: User's phone number (if available)
-   - updated_at: Timestamp of last update
+### Setting Up the Admin CLI
 
-2. **status** - Stores status history
-   - id: Auto-incrementing primary key
-   - user_id: Telegram user ID (foreign key to users table)
-   - status: Status string ('online', 'offline', 'recently', etc.)
-   - was_online: Timestamp when user was last seen online (for offline status)
-   - recorded_at: Timestamp when status was recorded
+1. Install the required dependencies for the admin script:
+   ```bash
+   pip install -r admin_requirements.txt
+   ```
 
-## Error Handling
+2. Run the admin script:
+   ```bash
+   python admin.py
+   ```
 
-The script includes comprehensive error handling to prevent crashes:
-- Telegram API rate limiting
-- Network errors
-- Database errors
-- Configuration errors
+### Managing Servers
+
+#### Adding a Server
+
+1. From the main menu, select **Server Management** → **Add server**
+2. Enter the requested information:
+   - Server name (an alias for easy reference)
+   - IP address
+   - Username (must have sudo privileges)
+   - Password
+
+#### Connecting to a Server
+
+1. From the main menu, select **Server Management** → **Connect to server**
+2. Choose a server from the list
+
+### Deploying the Tracker
+
+1. Connect to a server (as described above)
+2. From the main menu, select **Deployment** → **Deploy tracker**
+3. The script will:
+   - Upload all necessary files to `/opt/telegram-tracker/`
+   - Install required dependencies
+   - Create a systemd service for automatic startup
+   - Start the service
+
+### Managing the Service
+
+After deployment, you can manage the tracker service:
+
+1. **Start the service**:
+   - From the main menu, select **Service Management** → **Start service**
+
+2. **Stop the service**:
+   - From the main menu, select **Service Management** → **Stop service**
+
+3. **Enable service autostart**:
+   - From the main menu, select **Service Management** → **Enable service**
+
+4. **Disable service autostart**:
+   - From the main menu, select **Service Management** → **Disable service**
+
+5. **Check service status**:
+   - From the main menu, select **Service Management** → **Get service status**
+
+### Managing Data
+
+1. **Download logs**:
+   - From the main menu, select **Data Management** → **Download logs**
+   - The logs will be downloaded to your local machine
+
+2. **Download database**:
+   - From the main menu, select **Data Management** → **Download database**
+   - The database will be downloaded to your local machine for analysis
+
+### Executing Custom Commands
+
+If you need to perform custom operations on the server:
+
+1. From the main menu, select **Other** → **Execute custom command**
+2. Enter the command to execute
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Authentication Failed**: Ensure your Telegram API credentials are correct in the config file
+
+2. **Connection Errors**: Check your internet connection and verify the server is accessible
+
+3. **Permission Denied**: Ensure the user account has sudo privileges on the remote server
+
+4. **Service Won't Start**: Check the logs for errors using the **Download logs** option
+
+### Getting Help
+
+If you encounter issues not covered in this documentation, please:
+
+1. Check the log files for detailed error messages
+2. Ensure all configuration parameters are set correctly
+3. Verify that your server meets all the requirements
 
 ## License
 
 MIT
-
-
-## Administration Script
-
-The project includes an administration script (`admin.py`) that allows you to easily deploy and manage the tracker on remote servers.
-
-### Features
-
-- **Server Management**
-  - Store server credentials securely (IP, username, password)
-  - Add, remove, and list servers
-  - Connect to and disconnect from servers
-
-- **Deployment**
-  - Deploy the tracker bot to remote servers
-  - Upload necessary files (tracker script, config, requirements)
-  - Install dependencies automatically
-  - Set up systemd service for automatic startup
-
-- **Service Management**
-  - Start, stop, enable, and disable the systemd service
-  - Get service status
-
-- **Data Management**
-  - Download log files from the server
-  - Download the database file for backup or analysis
-
-### Requirements
-
-- Python 3.12+
-- Paramiko library (for SSH/SFTP functionality)
-
-### Installation
-
-Install the required dependencies for the administration script:
-
-```bash
-pip install -r admin_requirements.txt
-```
-
-### Usage
-
-Run the administration script:
-
-```bash
-python admin.py
-```
-
-This will launch an interactive CLI with the following options:
-
-1. **Server Management**
-   - List servers
-   - Add server
-   - Remove server
-   - Connect to server
-   - Disconnect from server
-
-2. **Deployment**
-   - Deploy tracker
-
-3. **Service Management**
-   - Start service
-   - Stop service
-   - Enable service
-   - Disable service
-   - Get service status
-
-4. **Data Management**
-   - Download logs
-   - Download database
-
-5. **Other**
-   - Execute custom command
-   - Exit
-
-### Deployment Process
-
-When deploying the tracker to a server, the script will:
-
-1. Upload all necessary files to `/opt/telegram-tracker/`
-2. Install required dependencies
-3. Create and enable a systemd service
-4. Start the service
-
-The systemd service will ensure that the tracker starts automatically on system boot and restarts if it crashes.
