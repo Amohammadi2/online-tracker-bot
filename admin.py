@@ -264,6 +264,98 @@ class DeploymentManager:
         self.service_name = 'telegram-tracker'
         self.service_file = f"{self.service_name}.service"
     
+    def initialize_service_startup(self, config_path: str) -> bool:
+        """Initialize the Telegram tracker service with authentication.
+        
+        This function runs the Telegram tracker script directly, handles the verification
+        code input process, and then sets up the service after successful authentication.
+        
+        Args:
+            config_path: Path to the configuration file.
+            
+        Returns:
+            bool: True if initialization successful, False otherwise.
+        """
+        if not self.server_manager.ssh_client or not self.server_manager.current_server:
+            print(f"{Colors.FAIL}Not connected to any server.{Colors.ENDC}")
+            return False
+        
+        try:
+            print(f"{Colors.CYAN}Initializing Telegram tracker authentication...{Colors.ENDC}")
+            
+            # Create a temporary channel for interactive commands
+            transport = self.server_manager.ssh_client.get_transport()
+            channel = transport.open_session()
+            channel.get_pty()
+            channel.invoke_shell()
+            
+            # Start the tracker script
+            command = f"cd {self.remote_base_dir} && {self.remote_base_dir}/venv/bin/python {self.remote_base_dir}/telegram_tracker.py"
+            channel.send(command + '\n')
+            
+            # Buffer for collecting output
+            output_buffer = ""
+            verification_code = None
+            authenticated = False
+            
+            print(f"{Colors.CYAN}Waiting for Telegram authentication prompt...{Colors.ENDC}")
+            
+            # Read output in chunks and look for verification code prompt or success message
+            while True:
+                if channel.recv_ready():
+                    chunk = channel.recv(4096).decode('utf-8')
+                    output_buffer += chunk
+                    print(chunk, end='')
+                    
+                    # Check if verification code is requested
+                    if "Please enter the code you received:" in output_buffer and not verification_code:
+                        verification_code = input(f"\n{Colors.BOLD}Enter Telegram verification code: {Colors.ENDC}")
+                        channel.send(verification_code + '\n')
+                        print(f"{Colors.CYAN}Verification code sent, waiting for authentication...{Colors.ENDC}")
+                    
+                    # Check if connected successfully
+                    if "Connected to Telegram successfully" in output_buffer:
+                        authenticated = True
+                        print(f"{Colors.GREEN}Authentication successful!{Colors.ENDC}")
+                        break
+                    
+                    # Check for common errors
+                    if "Invalid phone" in output_buffer or "The phone number is invalid" in output_buffer:
+                        print(f"{Colors.FAIL}Invalid phone number in configuration.{Colors.ENDC}")
+                        break
+                    
+                    if "The verification code is invalid" in output_buffer:
+                        print(f"{Colors.FAIL}Invalid verification code.{Colors.ENDC}")
+                        break
+                
+                # Prevent CPU hogging
+                time.sleep(0.1)
+            
+            # Stop the script after authentication
+            if authenticated:
+                print(f"{Colors.CYAN}Stopping the tracker to set up as a service...{Colors.ENDC}")
+                channel.send('\x03')  # Send Ctrl+C to stop the script
+                time.sleep(1)
+                
+                # Close the channel
+                channel.close()
+                
+                # Now set up the service
+                self._create_service_file()
+                self.enable_service()
+                self.start_service()
+                
+                print(f"{Colors.GREEN}Telegram tracker initialized and service started successfully.{Colors.ENDC}")
+                return True
+            else:
+                print(f"{Colors.FAIL}Failed to authenticate with Telegram.{Colors.ENDC}")
+                channel.close()
+                return False
+                
+        except Exception as e:
+            print(f"{Colors.FAIL}Initialization failed: {e}{Colors.ENDC}")
+            return False
+    
     def deploy(self, config_path: str) -> bool:
         """Deploy the Telegram tracker to the connected server.
         
@@ -297,16 +389,20 @@ class DeploymentManager:
             
             # Install dependencies
             print(f"{Colors.CYAN}Installing dependencies...{Colors.ENDC}")
-            self.server_manager.execute_command("apt-get update")
-            self.server_manager.execute_command("apt-get install -y python3 python3-pip")
-            self.server_manager.execute_command(f"pip3 install -r {self.remote_base_dir}/requirements.txt")
+            self.server_manager.execute_command(f"python3 -m venv {self.remote_base_dir}/venv")
+            self.server_manager.execute_command(f"{self.remote_base_dir}/venv/bin/python -m pip install --upgrade pip")
+            self.server_manager.execute_command(f"{self.remote_base_dir}/venv/bin/python -m pip install -r {self.remote_base_dir}/requirements.txt")
             
             # Set permissions
             self.server_manager.execute_command(f"chmod +x {self.remote_base_dir}/telegram_tracker.py")
             
-            # Enable and start service
-            self.enable_service()
-            self.start_service()
+            # Initialize the service with authentication
+            print(f"{Colors.CYAN}Initializing Telegram authentication...{Colors.ENDC}")
+            if not self.initialize_service_startup(config_path):
+                print(f"{Colors.WARNING}Authentication failed, setting up service without initialization.{Colors.ENDC}")
+                # Create service file and enable service even if authentication fails
+                self._create_service_file()
+                self.enable_service()
             
             print(f"{Colors.GREEN}Deployment completed successfully.{Colors.ENDC}")
             return True
@@ -318,20 +414,17 @@ class DeploymentManager:
     def _create_service_file(self) -> None:
         """Create systemd service file on the remote server."""
         service_content = f"""[Unit]
-        Description=Telegram Online Status Tracker
+        Description=Telegram Tracker Service
         After=network.target
         
         [Service]
         Type=simple
         User=root
         WorkingDirectory={self.remote_base_dir}
-        ExecStart=/usr/bin/python3 {self.remote_base_dir}/telegram_tracker.py
+        ExecStart={self.remote_base_dir}/venv/bin/python {self.remote_base_dir}/telegram_tracker.py
         Restart=on-failure
-        RestartSec=10
-        StandardOutput=syslog
-        StandardError=syslog
-        SyslogIdentifier={self.service_name}
-        
+        RestartSec=10s
+
         [Install]
         WantedBy=multi-user.target
         """
@@ -429,13 +522,6 @@ class DeploymentManager:
             
             # Get journal logs
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            journal_log_path = f"{local_dir}/{self.server_manager.current_server}_journal_{timestamp}.log"
-            
-            stdout, stderr = self.server_manager.execute_command(f"journalctl -u {self.service_name} -n 1000")
-            with open(journal_log_path, 'w') as f:
-                f.write(stdout)
-            
-            print(f"{Colors.GREEN}Journal logs saved to {journal_log_path}{Colors.ENDC}")
             
             # Download application log file if it exists
             remote_log_path = f"{self.remote_base_dir}/tracker.log"
@@ -528,21 +614,22 @@ class AdminCLI:
         
         print(f"\n{Colors.BOLD}Deployment:{Colors.ENDC}")
         print("  6. Deploy tracker")
+        print("  7. Initialize Telegram authentication")
         
         print(f"\n{Colors.BOLD}Service Management:{Colors.ENDC}")
-        print("  7. Start service")
-        print("  8. Stop service")
-        print("  9. Enable service")
-        print(" 10. Disable service")
-        print(" 11. Get service status")
+        print("  8. Start service")
+        print("  9. Stop service")
+        print(" 10. Enable service")
+        print(" 11. Disable service")
+        print(" 12. Get service status")
         
         print(f"\n{Colors.BOLD}Data Management:{Colors.ENDC}")
-        print(" 12. Download logs")
-        print(" 13. Download database")
+        print(" 13. Download logs")
+        print(" 14. Download database")
         
         print(f"\n{Colors.BOLD}Other:{Colors.ENDC}")
-        print(" 14. Execute custom command")
-        print(" 15. Exit")
+        print(" 15. Execute custom command")
+        print(" 16. Exit")
         
         if self.server_manager.current_server:
             print(f"\n{Colors.GREEN}Connected to: {self.server_manager.current_server}{Colors.ENDC}")
@@ -556,7 +643,7 @@ class AdminCLI:
             int: User choice.
         """
         try:
-            choice = input(f"\n{Colors.BOLD}Enter your choice (1-15): {Colors.ENDC}")
+            choice = input(f"\n{Colors.BOLD}Enter your choice (1-16): {Colors.ENDC}")
             return int(choice)
         except ValueError:
             return 0
@@ -582,23 +669,25 @@ class AdminCLI:
             elif choice == 6:
                 self._deploy_tracker()
             elif choice == 7:
-                self.deployment_manager.start_service()
+                self._initialize_authentication()
             elif choice == 8:
-                self.deployment_manager.stop_service()
+                self.deployment_manager.start_service()
             elif choice == 9:
-                self.deployment_manager.enable_service()
+                self.deployment_manager.stop_service()
             elif choice == 10:
-                self.deployment_manager.disable_service()
+                self.deployment_manager.enable_service()
             elif choice == 11:
+                self.deployment_manager.disable_service()
+            elif choice == 12:
                 status = self.deployment_manager.get_service_status()
                 print(f"\n{status}")
-            elif choice == 12:
-                self._download_logs()
             elif choice == 13:
-                self._download_database()
+                self._download_logs()
             elif choice == 14:
-                self._execute_custom_command()
+                self._download_database()
             elif choice == 15:
+                self._execute_custom_command()
+            elif choice == 16:
                 self._exit()
             else:
                 print(f"{Colors.FAIL}Invalid choice. Please try again.{Colors.ENDC}")
@@ -684,6 +773,29 @@ class AdminCLI:
         command = input("Enter command to execute: ")
         
         self.server_manager.execute_command(command)
+    
+    def _initialize_authentication(self) -> None:
+        """Initialize Telegram authentication without full deployment."""
+        print(f"\n{Colors.HEADER}Initialize Telegram Authentication{Colors.ENDC}")
+        
+        if not self.server_manager.current_server:
+            print(f"{Colors.FAIL}Not connected to any server. Please connect first.{Colors.ENDC}")
+            return
+        
+        config_path = input("Enter path to config.json (default: config.json): ") or "config.json"
+        
+        if not os.path.exists(config_path):
+            print(f"{Colors.FAIL}Config file not found: {config_path}{Colors.ENDC}")
+            return
+        
+        # Check if the tracker is already deployed
+        stdout, stderr = self.server_manager.execute_command(f"test -f {self.deployment_manager.remote_base_dir}/telegram_tracker.py && echo 'exists'")
+        if 'exists' not in stdout:
+            print(f"{Colors.FAIL}Telegram tracker not deployed. Please deploy first.{Colors.ENDC}")
+            return
+        
+        # Initialize authentication
+        self.deployment_manager.initialize_service_startup(config_path)
     
     def _exit(self) -> None:
         """Exit the CLI."""
