@@ -152,7 +152,7 @@ The project includes an administration script (`admin.py`) that allows you to ea
 
 ### Requirements
 
-- Python 3.6+
+- Python 3.12+
 - Paramiko library (for SSH/SFTP functionality)
 
 ### Installation

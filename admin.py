@@ -591,6 +591,117 @@ class DeploymentManager:
         except Exception as e:
             print(f"{Colors.FAIL}Failed to download database: {e}{Colors.ENDC}")
             return False
+    
+    def clear_logs(self) -> bool:
+        """Clear the tracker log file on the server.
+        
+        Returns:
+            bool: True if logs cleared successfully, False otherwise.
+        """
+        if not self.server_manager.ssh_client or not self.server_manager.current_server:
+            print(f"{Colors.FAIL}Not connected to any server.{Colors.ENDC}")
+            return False
+        
+        try:
+            print(f"{Colors.CYAN}Clearing log file on server...{Colors.ENDC}")
+            
+            # Get log file path from config
+            stdout, stderr = self.server_manager.execute_command(f"cat {self.remote_base_dir}/config.json")
+            if not stdout:
+                print(f"{Colors.FAIL}Could not read config file.{Colors.ENDC}")
+                return False
+            
+            try:
+                config = json.loads(stdout)
+                log_file = config.get('logging', {}).get('file', 'tracker.log')
+                
+                # If path is relative, prepend remote base dir
+                if not log_file.startswith('/'):
+                    log_path = f"{self.remote_base_dir}/{log_file}"
+                else:
+                    log_path = log_file
+                    
+            except json.JSONDecodeError:
+                print(f"{Colors.WARNING}Could not parse config JSON. Using default log path.{Colors.ENDC}")
+                log_path = f"{self.remote_base_dir}/tracker.log"
+            
+            # Check if log file exists
+            stdout, stderr = self.server_manager.execute_command(f"test -f {log_path} && echo 'exists'")
+            if 'exists' not in stdout:
+                print(f"{Colors.WARNING}Log file not found on server.{Colors.ENDC}")
+                return False
+            
+            # Clear the log file (truncate to zero size)
+            stdout, stderr = self.server_manager.execute_command(f"truncate -s 0 {log_path}")
+            if stderr:
+                print(f"{Colors.FAIL}Failed to clear log file: {stderr}{Colors.ENDC}")
+                return False
+            
+            print(f"{Colors.GREEN}Log file cleared successfully.{Colors.ENDC}")
+            return True
+            
+        except Exception as e:
+            print(f"{Colors.FAIL}Failed to clear logs: {e}{Colors.ENDC}")
+            return False
+    
+    def push_updates(self, tracker_script_path: str, config_path: str) -> bool:
+        """Push updates to the server by replacing the tracker script and config file.
+        
+        Args:
+            tracker_script_path: Path to the updated tracker script.
+            config_path: Path to the updated config file.
+            
+        Returns:
+            bool: True if updates pushed successfully, False otherwise.
+        """
+        if not self.server_manager.ssh_client or not self.server_manager.current_server:
+            print(f"{Colors.FAIL}Not connected to any server.{Colors.ENDC}")
+            return False
+        
+        try:
+            print(f"{Colors.CYAN}Pushing updates to server...{Colors.ENDC}")
+            
+            # Check if files exist locally
+            if not os.path.exists(tracker_script_path):
+                print(f"{Colors.FAIL}Tracker script not found: {tracker_script_path}{Colors.ENDC}")
+                return False
+                
+            if not os.path.exists(config_path):
+                print(f"{Colors.FAIL}Config file not found: {config_path}{Colors.ENDC}")
+                return False
+            
+            # Stop the service
+            print(f"{Colors.CYAN}Stopping the service...{Colors.ENDC}")
+            if not self.stop_service():
+                print(f"{Colors.WARNING}Failed to stop service. Continuing anyway...{Colors.ENDC}")
+            
+            # Upload files
+            files_to_upload = [
+                (tracker_script_path, f"{self.remote_base_dir}/telegram_tracker.py"),
+                (config_path, f"{self.remote_base_dir}/config.json")
+            ]
+            
+            for local_path, remote_path in files_to_upload:
+                print(f"{Colors.CYAN}Uploading {local_path} to {remote_path}...{Colors.ENDC}")
+                if not self.server_manager.upload_file(local_path, remote_path):
+                    print(f"{Colors.FAIL}Failed to upload {local_path}.{Colors.ENDC}")
+                    return False
+            
+            # Set permissions
+            self.server_manager.execute_command(f"chmod +x {self.remote_base_dir}/telegram_tracker.py")
+            
+            # Start the service
+            print(f"{Colors.CYAN}Starting the service...{Colors.ENDC}")
+            if not self.start_service():
+                print(f"{Colors.FAIL}Failed to start service.{Colors.ENDC}")
+                return False
+            
+            print(f"{Colors.GREEN}Updates pushed successfully.{Colors.ENDC}")
+            return True
+            
+        except Exception as e:
+            print(f"{Colors.FAIL}Failed to push updates: {e}{Colors.ENDC}")
+            return False
 
 
 class AdminCLI:
@@ -615,21 +726,23 @@ class AdminCLI:
         print(f"\n{Colors.BOLD}Deployment:{Colors.ENDC}")
         print("  6. Deploy tracker")
         print("  7. Initialize Telegram authentication")
+        print("  8. Push updates")
         
         print(f"\n{Colors.BOLD}Service Management:{Colors.ENDC}")
-        print("  8. Start service")
-        print("  9. Stop service")
-        print(" 10. Enable service")
-        print(" 11. Disable service")
-        print(" 12. Get service status")
+        print("  9. Start service")
+        print(" 10. Stop service")
+        print(" 11. Enable service")
+        print(" 12. Disable service")
+        print(" 13. Get service status")
         
         print(f"\n{Colors.BOLD}Data Management:{Colors.ENDC}")
-        print(" 13. Download logs")
-        print(" 14. Download database")
+        print(" 14. Download logs")
+        print(" 15. Download database")
+        print(" 16. Clear logs")
         
         print(f"\n{Colors.BOLD}Other:{Colors.ENDC}")
-        print(" 15. Execute custom command")
-        print(" 16. Exit")
+        print(" 17. Execute custom command")
+        print(" 18. Exit")
         
         if self.server_manager.current_server:
             print(f"\n{Colors.GREEN}Connected to: {self.server_manager.current_server}{Colors.ENDC}")
@@ -643,7 +756,7 @@ class AdminCLI:
             int: User choice.
         """
         try:
-            choice = input(f"\n{Colors.BOLD}Enter your choice (1-16): {Colors.ENDC}")
+            choice = input(f"\n{Colors.BOLD}Enter your choice (1-18): {Colors.ENDC}")
             return int(choice)
         except ValueError:
             return 0
@@ -671,23 +784,27 @@ class AdminCLI:
             elif choice == 7:
                 self._initialize_authentication()
             elif choice == 8:
-                self.deployment_manager.start_service()
+                self._push_updates()
             elif choice == 9:
-                self.deployment_manager.stop_service()
+                self.deployment_manager.start_service()
             elif choice == 10:
-                self.deployment_manager.enable_service()
+                self.deployment_manager.stop_service()
             elif choice == 11:
-                self.deployment_manager.disable_service()
+                self.deployment_manager.enable_service()
             elif choice == 12:
+                self.deployment_manager.disable_service()
+            elif choice == 13:
                 status = self.deployment_manager.get_service_status()
                 print(f"\n{status}")
-            elif choice == 13:
-                self._download_logs()
             elif choice == 14:
-                self._download_database()
+                self._download_logs()
             elif choice == 15:
-                self._execute_custom_command()
+                self._download_database()
             elif choice == 16:
+                self._clear_logs()
+            elif choice == 17:
+                self._execute_custom_command()
+            elif choice == 18:
                 self._exit()
             else:
                 print(f"{Colors.FAIL}Invalid choice. Please try again.{Colors.ENDC}")
@@ -796,6 +913,51 @@ class AdminCLI:
         
         # Initialize authentication
         self.deployment_manager.initialize_service_startup(config_path)
+    
+    def _push_updates(self) -> None:
+        """Push updates to the server."""
+        print(f"\n{Colors.HEADER}Push Updates{Colors.ENDC}")
+        
+        if not self.server_manager.current_server:
+            print(f"{Colors.FAIL}Not connected to any server. Please connect first.{Colors.ENDC}")
+            return
+        
+        tracker_script_path = input("Enter path to telegram_tracker.py (default: telegram_tracker.py): ") or "telegram_tracker.py"
+        config_path = input("Enter path to config.json (default: config.json): ") or "config.json"
+        
+        if not os.path.exists(tracker_script_path):
+            print(f"{Colors.FAIL}Tracker script not found: {tracker_script_path}{Colors.ENDC}")
+            return
+            
+        if not os.path.exists(config_path):
+            print(f"{Colors.FAIL}Config file not found: {config_path}{Colors.ENDC}")
+            return
+        
+        # Check if the tracker is already deployed
+        stdout, stderr = self.server_manager.execute_command(f"test -f {self.deployment_manager.remote_base_dir}/telegram_tracker.py && echo 'exists'")
+        if 'exists' not in stdout:
+            print(f"{Colors.FAIL}Telegram tracker not deployed. Please deploy first.{Colors.ENDC}")
+            return
+        
+        # Push updates
+        self.deployment_manager.push_updates(tracker_script_path, config_path)
+    
+    def _clear_logs(self) -> None:
+        """Clear logs on the server."""
+        print(f"\n{Colors.HEADER}Clear Logs{Colors.ENDC}")
+        
+        if not self.server_manager.current_server:
+            print(f"{Colors.FAIL}Not connected to any server. Please connect first.{Colors.ENDC}")
+            return
+        
+        # Confirm action
+        confirm = input(f"{Colors.WARNING}Are you sure you want to clear the logs? This action cannot be undone. (y/n): {Colors.ENDC}").lower()
+        if confirm != 'y':
+            print(f"{Colors.CYAN}Operation cancelled.{Colors.ENDC}")
+            return
+        
+        # Clear logs
+        self.deployment_manager.clear_logs()
     
     def _exit(self) -> None:
         """Exit the CLI."""
