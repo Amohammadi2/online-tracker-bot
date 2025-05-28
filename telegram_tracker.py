@@ -387,7 +387,7 @@ class TelegramTracker:
         self.logger.info(f"Check interval: {self.check_interval} seconds")
         
         while self.is_running:
-            self._reconnect_if_needed()
+            await self._reconnect_if_needed()
             try:
                 await self._check_all_users()
                 self.logger.info(f"Sleeping for {self.check_interval} seconds")
