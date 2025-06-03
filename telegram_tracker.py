@@ -371,7 +371,7 @@ class TelegramTracker:
         while True:
             if not self.client.is_connected():
                 self.logger.warning("Client disconnected. Reconnecting...")
-                self.client.disconnect() # clean up any old connections
+                # self.client.disconnect() # clean up any old connections
                 try:
                     await self._connect()
                     self.logger.info("Successfully reconnected to Telegram APIs")
