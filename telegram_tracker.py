@@ -394,8 +394,8 @@ class TelegramTracker:
                 self.logger.info(f"Sleeping for {self.check_interval} seconds")
                 await asyncio.sleep(self.check_interval)
             except asyncio.CancelledError:
-                self.logger.info("Tracking loop cancelled")
-                break
+                self.logger.info("Tracking loop cancelled, restarting the tracking loop within 10 seconds")
+                await asyncio.sleep(10)
             except Exception as e:
                 self.logger.error(f"Error in tracking loop: {e}")
                 # Sleep a bit to avoid tight error loops
